@@ -1,0 +1,24 @@
+build-env/
+guizang-tv/.gradle/
+guizang-tv/build/
+guizang-tv/app/build/
+guizang-tv/local.properties
+platform-tools/
+*.apk
+*.png
+*.zip
+*.tar.gz
+
+# 本机设备信息（含序列号），只留在本地
+tv-info.txt
+all-packages.txt
+boot-*.png
+*-result.png
+
+# 个人照片与生成的壁纸资源，不进公开仓库
+wallpapers/*.jpg
+wallpapers/*.jpeg
+wallpapers/*.png
+guizang-tv/app/src/main/assets/wallpapers/local/
+guizang-tv/.wallpaper-backups/
+guizang-tv/.venv/

@@ -1,0 +1,832 @@
+diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+index 812a6e1..247c470 100644
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -1,5 +1,6 @@
+ <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+     <uses-permission android:name="android.permission.INTERNET" />
++    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+     <uses-feature android:name="android.software.leanback" android:required="false" />
+     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+     <queries>
+@@ -38,5 +39,13 @@
+                 <category android:name="android.intent.category.INFO" />
+             </intent-filter>
+         </activity>
++        <!-- This TV resets the Home/boot target from a read-only factory config on
++             every boot, so the launcher reclaims it and shows itself once more. -->
++        <receiver android:name=".BootReceiver" android:exported="true" android:enabled="true">
++            <intent-filter>
++                <action android:name="android.intent.action.BOOT_COMPLETED" />
++                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
++            </intent-filter>
++        </receiver>
+     </application>
+ </manifest>
+diff --git b/app/src/main/assets/devices.json b/app/src/main/assets/devices.json
+new file mode 100644
+index 0000000..27b6b5b
+--- /dev/null
++++ b/app/src/main/assets/devices.json
+@@ -0,0 +1,87 @@
++{
++  "version": 1,
++  "comment": "Per-TV behaviour. Profiles are matched top-down against Build.MANUFACTURER / BRAND / MODEL; '*' is a glob. The first match wins, 'generic' is the fallback. Adding a TV means adding an entry here, not editing Java. See docs/DEVICE-PROFILES.md.",
++  "profiles": [
++    {
++      "id": "xiaomi-mitv-mtsu0",
++      "name": "小米电视 MiTV-MTSU0",
++      "homeLabel": "小米原桌面",
++      "bootStart": true,
++      "match": {
++        "model": ["MiTV-MTSU0"]
++      },
++      "home": [
++        {"id": "hdmi:2", "label": "PlayStation 5"},
++        {"id": "hdmi:1", "label": "Apple TV"},
++        {"id": "com.xiaodianshi.tv.yst", "label": "哔哩哔哩"},
++        {"id": "com.xiaomi.mitv.smartshare", "label": "小米投屏"},
++        {"id": "com.mitv.gallery", "label": "相册"},
++        {"id": "com.mitv.tvhome", "label": "小米原桌面"}
++      ],
++      "labels": {
++        "com.xiaodianshi.tv.yst": "哔哩哔哩",
++        "com.xiaomi.mitv.smartshare": "小米投屏",
++        "com.mitv.gallery": "相册",
++        "com.mitv.tvhome": "小米原桌面"
++      },
++      "stockHome": {
++        "component": "com.mitv.tvhome/com.mitv.tvhome.MainActivity",
++        "action": "android.intent.action.MAIN"
++      },
++      "hdmi": {
++        "component": "com.xiaomi.mitv.tvplayer/com.xiaomi.mitv.tvplayer.ExternalSourceActivity",
++        "action": "com.xiaomi.mitv.tvplayer.EXTSRC_PLAY",
++        "extra": "input",
++        "base": 22,
++        "ports": [1, 2]
++      },
++      "inputs": {
++        "action": "com.xiaomi.mitv.settings.INPUTSOURCE_POPUP",
++        "component": "com.xiaomi.mitv.settings/com.xiaomi.mitv.settings.SettingsBroadcastReceiver"
++      },
++      "settings": {
++        "android.settings.SETTINGS": {
++          "action": "com.xiaomi.mitv.settings.SETTINGS",
++          "component": "com.xiaomi.mitv.settings/.entry.MainActivity"
++        },
++        "android.settings.WIFI_SETTINGS": {
++          "action": "com.xiaomi.mitv.settings.WIFI_SETTINGS",
++          "component": "com.xiaomi.mitv.settings/.wifi.MitvWifiActivity"
++        }
++      }
++    },
++    {
++      "id": "skyworth-coocaa-bc20",
++      "name": "创维/酷开 1AA02_BC20（商用）",
++      "homeLabel": "创维原桌面",
++      "bootStart": false,
++      "match": {
++        "manufacturer": ["Skyworth"],
++        "brand": ["Skyworth", "Coocaa"]
++      },
++      "home": [
++        {"id": "com.xiaodianshi.tv.yst", "label": "哔哩哔哩"},
++        {"id": "com.tianci.movieplatform", "label": "创维原桌面"}
++      ],
++      "labels": {
++        "com.xiaodianshi.tv.yst": "哔哩哔哩"
++      },
++      "stockHome": {
++        "component": "com.tianci.movieplatform/com.coocaa.homepage.vast.RealHomePageActivity",
++        "action": "android.intent.action.MAIN"
++      },
++      "claims": {
++        "persist.service.homepage.pkg": "$package",
++        "persist.service.homepage.cls": "$package.FrameHomeActivity"
++      }
++    },
++    {
++      "id": "generic",
++      "name": "通用 Android TV",
++      "homeLabel": "原桌面",
++      "bootStart": false,
++      "match": {},
++      "home": []
++    }
++  ]
++}
+diff --git b/app/src/main/java/io/github/op7418/guizangtv/BootReceiver.java b/app/src/main/java/io/github/op7418/guizangtv/BootReceiver.java
+new file mode 100644
+index 0000000..fe1d6ac
+--- /dev/null
++++ b/app/src/main/java/io/github/op7418/guizangtv/BootReceiver.java
+@@ -0,0 +1,22 @@
++package io.github.op7418.guizangtv;
++
++import android.content.BroadcastReceiver;
++import android.content.Context;
++import android.content.Intent;
++import android.util.Log;
++
++/** Reclaims the Home/boot target after the firmware resets it, then shows the launcher. */
++public final class BootReceiver extends BroadcastReceiver {
++    @Override public void onReceive(Context context, Intent intent) {
++        String action = intent == null ? null : intent.getAction();
++        if (!Intent.ACTION_BOOT_COMPLETED.equals(action)
++                && !Intent.ACTION_LOCKED_BOOT_COMPLETED.equals(action)) return;
++        DeviceProfile.get(context).claim(context);
++        try {
++            context.startActivity(new Intent(context, FrameHomeActivity.class)
++                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP));
++        } catch (RuntimeException unavailable) {
++            Log.w("GuiZangBoot", "cannot start launcher after boot", unavailable);
++        }
++    }
++}
+diff --git a/app/src/main/java/io/github/op7418/guizangtv/BootStart.java b/app/src/main/java/io/github/op7418/guizangtv/BootStart.java
+index ae2fa17..ddd6853 100644
+--- a/app/src/main/java/io/github/op7418/guizangtv/BootStart.java
++++ b/app/src/main/java/io/github/op7418/guizangtv/BootStart.java
+@@ -23,7 +23,7 @@ public final class BootStart {
+     }
+     static void enter(Activity a) {
+         int boot = bootCount(a);
+-        String reason = BootStartPolicy.skipReason(XiaomiControls.enabled(), enabled(a), boot, prefs(a).getInt("attempted", -1),
++        String reason = BootStartPolicy.skipReason(DeviceProfile.get(a).bootStart, enabled(a), boot, prefs(a).getInt("attempted", -1),
+                 SystemClock.elapsedRealtime());
+         if (reason != null) { Log.i("GuiZangBoot", reason); return; }
+         if (!prefs(a).edit().putInt("attempted", boot).putString("status", "系统已调用启动入口，等待界面确认").commit()) return;
+@@ -59,16 +59,18 @@ public final class BootStart {
+                 .setNegativeButton("返回", null).show();
+     }
+     static void show(Activity a) {
+-        if (!XiaomiControls.enabled()) {
++        DeviceProfile profile = DeviceProfile.get(a);
++        if (!profile.bootStart) {
+             new AlertDialog.Builder(a).setTitle("开机自动进入（实验）")
+-                    .setMessage("目前仅适配 MiTV-MTSU0。其他机型请先使用普通应用入口。")
++                    .setMessage("当前设备配置（" + profile.name + "）没有内置开机自启入口。\n"
++                            + "请先使用普通应用入口，或在 assets/devices.json 里为该机型补上启动方式。")
+                     .setNegativeButton("返回", null).show();
+             return;
+         }
+         String state = prefs(a).getString("status", "尚未进行完整重启测试");
+         new AlertDialog.Builder(a).setTitle("开机自动进入（实验）")
+                 .setMessage("仅在完整开机后尝试一次，不接管 Home 键，同次开机的后续调用直接跳过。\n\n"
+-                        + "由已适配的小米系统调用启动入口；不需要悬浮窗权限。\n\n"
++                        + "由已适配的电视系统调用启动入口；不需要悬浮窗权限。\n\n"
+                         + "系统入口：" + (configured(a) ? "已配置" : "尚未配置，需电脑设置") + "\n上次状态：" + state)
+                 .setPositiveButton(enabled(a) ? "关闭自动进入" : "开启自动进入", (d, which) -> {
+                     boolean value = !enabled(a);
+diff --git b/app/src/main/java/io/github/op7418/guizangtv/DeviceProfile.java b/app/src/main/java/io/github/op7418/guizangtv/DeviceProfile.java
+new file mode 100644
+index 0000000..74e7778
+--- /dev/null
++++ b/app/src/main/java/io/github/op7418/guizangtv/DeviceProfile.java
+@@ -0,0 +1,309 @@
++package io.github.op7418.guizangtv;
++
++import android.content.ComponentName;
++import android.content.Context;
++import android.content.Intent;
++import android.content.pm.ActivityInfo;
++import android.content.pm.PackageManager;
++import android.os.Build;
++import android.util.Log;
++import org.json.JSONArray;
++import org.json.JSONObject;
++
++import java.io.ByteArrayOutputStream;
++import java.io.InputStream;
++import java.nio.charset.StandardCharsets;
++import java.util.*;
++
++/**
++ * Everything that differs between TV brands.
++ *
++ * Profiles are read from {@code assets/devices.json} and matched top-down against
++ * {@link Build#MANUFACTURER}, {@link Build#BRAND} and {@link Build#MODEL}. The first
++ * match wins and the {@code generic} profile is the fallback, so supporting another
++ * TV means adding a JSON entry, not touching Java. See docs/DEVICE-PROFILES.md.
++ */
++final class DeviceProfile {
++    private static final String TAG = "TvHome.Profile";
++    private static final String ASSET = "devices.json";
++    private static volatile DeviceProfile cached;
++
++    final String id;
++    final String name;
++    final String homeLabel;
++    final boolean bootStart;
++    final List<Entry> home = new ArrayList<>();
++    final Map<String,String> labels = new LinkedHashMap<>();
++    final ComponentName stockHome;
++    final String stockHomeAction;
++    final ComponentName hdmiComponent;
++    final String hdmiAction;
++    final String hdmiExtra;
++    final int hdmiBase;
++    final Set<Integer> hdmiPorts = new LinkedHashSet<>();
++    final ComponentName inputsComponent;
++    final String inputsAction;
++    final Map<String,IntentSpec> settings = new LinkedHashMap<>();
++    final Map<String,String> claims = new LinkedHashMap<>();
++
++    static final class Entry {
++        final String id;
++        final String label;
++        Entry(String id, String label) { this.id = id; this.label = label; }
++    }
++
++    static final class IntentSpec {
++        final String action;
++        final ComponentName component;
++        IntentSpec(String action, ComponentName component) { this.action = action; this.component = component; }
++    }
++
++    private DeviceProfile(JSONObject json) {
++        id = json.optString("id", "generic");
++        name = json.optString("name", id);
++        homeLabel = json.optString("homeLabel", "原桌面");
++        bootStart = json.optBoolean("bootStart", false);
++
++        JSONArray homes = json.optJSONArray("home");
++        if (homes != null) for (int i = 0; i < homes.length(); i++) {
++            JSONObject item = homes.optJSONObject(i);
++            if (item == null) continue;
++            String entryId = text(item, "id");
++            if (entryId == null) continue;
++            String label = text(item, "label");
++            home.add(new Entry(entryId, label == null ? entryId : label));
++        }
++
++        JSONObject labelJson = json.optJSONObject("labels");
++        if (labelJson != null) for (Iterator<String> it = labelJson.keys(); it.hasNext();) {
++            String key = it.next();
++            String value = text(labelJson, key);
++            if (key != null && value != null) labels.put(key, value);
++        }
++
++        JSONObject stock = json.optJSONObject("stockHome");
++        stockHome = stock == null ? null : component(text(stock, "component"));
++        stockHomeAction = stock == null ? null : text(stock, "action");
++
++        JSONObject hdmi = json.optJSONObject("hdmi");
++        hdmiComponent = hdmi == null ? null : component(text(hdmi, "component"));
++        hdmiAction = hdmi == null ? null : text(hdmi, "action");
++        hdmiExtra = hdmi == null ? null : text(hdmi, "extra");
++        hdmiBase = hdmi == null ? 0 : hdmi.optInt("base", 0);
++        JSONArray ports = hdmi == null ? null : hdmi.optJSONArray("ports");
++        if (ports != null) for (int i = 0; i < ports.length(); i++) hdmiPorts.add(ports.optInt(i));
++
++        JSONObject inputs = json.optJSONObject("inputs");
++        inputsComponent = inputs == null ? null : component(text(inputs, "component"));
++        inputsAction = inputs == null ? null : text(inputs, "action");
++
++        JSONObject settingsJson = json.optJSONObject("settings");
++        if (settingsJson != null) for (Iterator<String> it = settingsJson.keys(); it.hasNext();) {
++            String standard = it.next();
++            JSONObject spec = settingsJson.optJSONObject(standard);
++            if (spec == null) continue;
++            settings.put(standard, new IntentSpec(text(spec, "action"), component(text(spec, "component"))));
++        }
++
++        JSONObject claimsJson = json.optJSONObject("claims");
++        if (claimsJson != null) for (Iterator<String> it = claimsJson.keys(); it.hasNext();) {
++            String key = it.next();
++            String value = text(claimsJson, key);
++            if (key != null && value != null) claims.put(key, value);
++        }
++    }
++
++    static DeviceProfile get(Context context) {
++        DeviceProfile local = cached;
++        if (local != null) return local;
++        synchronized (DeviceProfile.class) {
++            if (cached == null) cached = load(context.getApplicationContext());
++            return cached;
++        }
++    }
++
++    /** For tests and for future per-user overrides. */
++    static DeviceProfile parse(String json) throws Exception {
++        return new DeviceProfile(new JSONObject(json));
++    }
++
++    private static DeviceProfile load(Context context) {
++        try {
++            JSONObject root = new JSONObject(readAsset(context));
++            JSONArray profiles = root.optJSONArray("profiles");
++            JSONObject fallback = null;
++            if (profiles != null) for (int i = 0; i < profiles.length(); i++) {
++                JSONObject item = profiles.optJSONObject(i);
++                if (item == null) continue;
++                if ("generic".equals(item.optString("id", ""))) { fallback = item; continue; }
++                if (matches(item.optJSONObject("match"))) {
++                    Log.i(TAG, "profile " + item.optString("id") + " for " + Build.MANUFACTURER + "/" + Build.MODEL);
++                    return new DeviceProfile(item);
++                }
++            }
++            if (fallback != null) return new DeviceProfile(fallback);
++        } catch (Exception error) {
++            Log.w(TAG, "cannot read " + ASSET + ", falling back to empty profile", error);
++        }
++        return new DeviceProfile(new JSONObject());
++    }
++
++    private static String readAsset(Context context) throws Exception {
++        try (InputStream in = context.getAssets().open(ASSET)) {
++            ByteArrayOutputStream out = new ByteArrayOutputStream();
++            byte[] buffer = new byte[8192];
++            int read;
++            while ((read = in.read(buffer)) > 0) out.write(buffer, 0, read);
++            return new String(out.toByteArray(), StandardCharsets.UTF_8);
++        }
++    }
++
++    private static boolean matches(JSONObject match) {
++        if (match == null || match.length() == 0) return false;
++        return field(match, "manufacturer", Build.MANUFACTURER)
++                && field(match, "brand", Build.BRAND)
++                && field(match, "model", Build.MODEL);
++    }
++
++    private static boolean field(JSONObject match, String key, String value) {
++        JSONArray patterns = match.optJSONArray(key);
++        if (patterns == null || patterns.length() == 0) return true;
++        for (int i = 0; i < patterns.length(); i++) if (glob(patterns.optString(i), value)) return true;
++        return false;
++    }
++
++    /** Plain equality, or a glob when the pattern contains '*'. */
++    static boolean glob(String pattern, String value) {
++        if (pattern == null || value == null) return false;
++        if (!pattern.contains("*")) return pattern.equalsIgnoreCase(value);
++        StringBuilder regex = new StringBuilder();
++        for (char ch : pattern.toCharArray()) {
++            if (ch == '*') regex.append(".*");
++            else if ("\\.[]{}()+-^$|?".indexOf(ch) >= 0) regex.append('\\').append(ch);
++            else regex.append(ch);
++        }
++        return value.matches("(?i)" + regex);
++    }
++
++    private static String text(JSONObject object, String key) {
++        if (object == null || !object.has(key) || object.isNull(key)) return null;
++        String value = object.optString(key, null);
++        return value == null || value.isEmpty() ? null : value;
++    }
++
++    private static ComponentName component(String flattened) {
++        if (flattened == null || !flattened.contains("/")) return null;
++        try {
++            return ComponentName.unflattenFromString(flattened);
++        } catch (RuntimeException invalid) {
++            Log.w(TAG, "bad component " + flattened, invalid);
++            return null;
++        }
++    }
++
++    boolean isStockHome(String packageId) {
++        return stockHome != null && stockHome.getPackageName().equals(packageId);
++    }
++
++    /** Opens the TV's own launcher, as configured for this device. */
++    boolean openStockHome(Context context) {
++        if (stockHome == null) return false;
++        try {
++            ActivityInfo info = context.getPackageManager().getActivityInfo(stockHome, 0);
++            if (!info.enabled || !info.exported) return false;
++            if (info.permission != null
++                    && context.checkSelfPermission(info.permission) != PackageManager.PERMISSION_GRANTED)
++                return false;
++            context.startActivity(intent(stockHomeAction, stockHome)
++                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED));
++            return true;
++        } catch (Exception unavailable) {
++            Log.w(TAG, "stock home unavailable", unavailable);
++            return false;
++        }
++    }
++
++    /** Switches to an HDMI input; returns false when this device has no mapping for it. */
++    boolean openHdmi(Context context, int port) {
++        if (hdmiComponent == null || !hdmiPorts.contains(port)) return false;
++        try {
++            ActivityInfo info = context.getPackageManager().getActivityInfo(hdmiComponent, 0);
++            if (!info.enabled || !info.exported) return false;
++            if (info.permission != null
++                    && context.checkSelfPermission(info.permission) != PackageManager.PERMISSION_GRANTED)
++                return false;
++            Intent target = intent(hdmiAction, hdmiComponent);
++            if (hdmiExtra != null) target.putExtra(hdmiExtra, hdmiBase + port);
++            context.startActivity(target.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
++            return true;
++        } catch (Exception unavailable) {
++            Log.w(TAG, "HDMI " + port + " unavailable", unavailable);
++            return false;
++        }
++    }
++
++    boolean showInputs(Context context) {
++        if (inputsComponent == null || inputsAction == null) return false;
++        try {
++            ActivityInfo info = context.getPackageManager().getReceiverInfo(inputsComponent, 0);
++            if (!info.exported || !info.enabled) return false;
++            if (info.permission != null
++                    && context.checkSelfPermission(info.permission) != PackageManager.PERMISSION_GRANTED)
++                return false;
++            context.sendBroadcast(new Intent(inputsAction).setComponent(inputsComponent));
++            return true;
++        } catch (Exception unavailable) {
++            return false;
++        }
++    }
++
++    /** Device-specific intent for a standard settings action, or the standard intent. */
++    Intent settings(Context context, String standardAction) {
++        IntentSpec spec = settings.get(standardAction);
++        if (spec == null) return new Intent(standardAction);
++        Intent target = intent(spec.action, spec.component);
++        if (spec.component != null
++                && target.resolveActivity(context.getPackageManager()) == null)
++            return new Intent(standardAction);
++        return target;
++    }
++
++    String label(String packageId, String original) {
++        String mapped = labels.get(packageId);
++        return mapped == null ? original : mapped;
++    }
++
++    /**
++     * Some firmwares ignore the Android default-home setting and pick Home/boot
++     * targets from system properties. Reclaiming them here keeps this launcher in
++     * charge; the values are written with setprop so no extra permission is needed.
++     */
++    void claim(Context context) {
++        if (claims.isEmpty()) return;
++        String self = context.getPackageName();
++        for (Map.Entry<String,String> entry : claims.entrySet())
++            setTextProperty(entry.getKey(), entry.getValue().replace("$package", self));
++    }
++
++    void claimAsync(Context context) {
++        if (claims.isEmpty()) return;
++        Context app = context.getApplicationContext();
++        new Thread(() -> claim(app), "device-claim").start();
++    }
++
++    private static void setTextProperty(String key, String value) {
++        try {
++            Process process = Runtime.getRuntime().exec(new String[]{"/system/bin/setprop", key, value});
++            int code = process.waitFor();
++            Log.i(TAG, "setprop " + key + " exit=" + code);
++        } catch (Exception error) {
++            Log.w(TAG, "setprop " + key + " failed", error);
++        }
++    }
++
++    private static Intent intent(String action, ComponentName component) {
++        Intent intent = action == null ? new Intent(Intent.ACTION_MAIN) : new Intent(action);
++        if (component != null) intent.setComponent(component);
++        return intent;
++    }
++}
+diff --git a/app/src/main/java/io/github/op7418/guizangtv/FrameHomeActivity.java b/app/src/main/java/io/github/op7418/guizangtv/FrameHomeActivity.java
+index 24e9337..a3d6e41 100644
+--- a/app/src/main/java/io/github/op7418/guizangtv/FrameHomeActivity.java
++++ b/app/src/main/java/io/github/op7418/guizangtv/FrameHomeActivity.java
+@@ -13,6 +13,7 @@ import java.util.*;
+ /** Native TV home and one grouped Settings entry. */
+ public final class FrameHomeActivity extends Activity implements HomeSurface.Actions {
+     final Handler handler = new Handler(Looper.getMainLooper());
++    DeviceProfile profile;
+     HomeAppearance appearance;
+     HomeItems items;
+     FrameWallpapers wallpapers;
+@@ -34,7 +35,7 @@ public final class FrameHomeActivity extends Activity implements HomeSurface.Act
+     @Override protected void onCreate(Bundle state){
+         super.onCreate(state);
+         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN|View.SYSTEM_UI_FLAG_HIDE_NAVIGATION|View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+-        appearance=new HomeAppearance(this);items=new HomeItems(this);
++        appearance=new HomeAppearance(this);profile=DeviceProfile.get(this);items=new HomeItems(this);
+         selected=getSharedPreferences("frame-home",0).getInt("selected",0);
+         root=new FrameLayout(this);photo=new ImageView(this);transition=new ImageView(this);
+         photo.setScaleType(ImageView.ScaleType.CENTER_CROP);transition.setScaleType(ImageView.ScaleType.CENTER_CROP);transition.setAlpha(0);
+@@ -65,20 +66,20 @@ public final class FrameHomeActivity extends Activity implements HomeSurface.Act
+     void updateRotation(){if(weather!=null)weather.active(resumed&&!settings.showing()&&(assistant==null||!assistant.showing())&&(library==null||!library.isShowing()));if(resumed&&appearance.get("background")==0&&!settings.showing()&&(assistant==null||!assistant.showing())&&(library==null||!library.isShowing()))wallpapers.resume();else wallpapers.pause();}
+     @Override public void selected(int index){selected=index;getSharedPreferences("frame-home",0).edit().putInt("selected",index).apply();}
+     @Override public void open(String id){
+-        if(id.startsWith("hdmi:")){if(!XiaomiControls.openHdmi(this,Integer.parseInt(id.substring(5))))message("暂时无法切换信号源");return;}
+-        if("com.mitv.tvhome".equals(id)){stockHome();return;}
++        if(id.startsWith("hdmi:")){if(!profile.openHdmi(this,Integer.parseInt(id.substring(5))))message("暂时无法切换信号源");return;}
++        if(profile.isStockHome(id)){stockHome();return;}
+         Intent intent=getPackageManager().getLeanbackLaunchIntentForPackage(id);
+         if(intent==null)intent=getPackageManager().getLaunchIntentForPackage(id);
+         launch(intent,"应用暂时不可用");
+     }
+     @Override public void control(int index){
+         if(index==0)showLibrary();
+-        else if(index==1){if(!XiaomiControls.showInputs(this))message("暂时无法打开信号源");}
++        else if(index==1){if(!profile.showInputs(this))message("暂时无法打开信号源");}
+         else if(index==2)settings.show();
+         else if(index==3&&HomeAssistant.enabled(this))assistant.show();
+     }
+-    void stockHome(){if(!XiaomiControls.startStockHome(this,new ComponentName("com.mitv.tvhome","com.mitv.tvhome.MainActivity")))message("暂时无法打开小米原桌面");}
+-    void systemSettings(){Intent i=XiaomiControls.settings(this,Settings.ACTION_SETTINGS);if(i==null)i=new Intent(Settings.ACTION_SETTINGS);launch(i,"暂时无法打开设置");}
++    void stockHome(){if(!profile.openStockHome(this))message("暂时无法打开原桌面");}
++    void systemSettings(){launch(profile.settings(this,Settings.ACTION_SETTINGS),"暂时无法打开设置");}
+     private void launch(Intent i,String error){if(i==null){message(error);return;}try{startActivity(i);}catch(RuntimeException unavailable){message(error);}}
+     private void showLibrary(){
+         items.discover();List<String> ids=new ArrayList<>(items.names.keySet());ids.removeIf(id->id.startsWith("hdmi:") || (getPackageManager().getLeanbackLaunchIntentForPackage(id)==null && getPackageManager().getLaunchIntentForPackage(id)==null));
+@@ -87,11 +88,11 @@ public final class FrameHomeActivity extends Activity implements HomeSurface.Act
+         library=new AlertDialog.Builder(this).setTitle("全部应用").setItems(labels,(d,i)->open(ids.get(i))).setNegativeButton("返回",null).create();
+         library.setOnDismissListener(d->{surface.controls.get(0).requestFocus();updateRotation();});library.show();updateRotation();
+     }
+-    @Override protected void onResume(){super.onResume();resumed=true;assistant.active(true);BootStart.confirm(this);handler.removeCallbacks(tick);tick.run();updateRotation();}
++    @Override protected void onResume(){super.onResume();resumed=true;profile.claimAsync(this);assistant.active(true);BootStart.confirm(this);handler.removeCallbacks(tick);tick.run();updateRotation();}
+     @Override protected void onNewIntent(Intent i){super.onNewIntent(i);setIntent(i);}
+     @Override protected void onPause(){resumed=false;assistant.active(false);weather.active(false);handler.removeCallbacks(tick);wallpapers.pause();if(library!=null)library.dismiss();super.onPause();}
+     @Override protected void onDestroy(){assistant.destroy();settings.close();weather.destroy();wallpapers.destroy();handler.removeCallbacksAndMessages(null);super.onDestroy();}
+-    @Override public void onBackPressed(){if(surface.controls.contains(getCurrentFocus()))surface.focusApp();else if(XiaomiControls.enabled())stockHome();else super.onBackPressed();}
++    @Override public void onBackPressed(){if(surface.controls.contains(getCurrentFocus()))surface.focusApp();else stockHome();}
+     @Override public void dump(String prefix,java.io.FileDescriptor fd,java.io.PrintWriter out,String[] args){
+         super.dump(prefix,fd,out,args);wallpapers.dump(out);BootStart.dump(this,out);weather.dump(out);
+         out.println("HomeAppearance: "+appearance.prefs.getAll()+" items="+items.order+" settings="+settings.page());
+diff --git a/app/src/main/java/io/github/op7418/guizangtv/HomeItems.java b/app/src/main/java/io/github/op7418/guizangtv/HomeItems.java
+index 0b23ca0..6bba07e 100644
+--- a/app/src/main/java/io/github/op7418/guizangtv/HomeItems.java
++++ b/app/src/main/java/io/github/op7418/guizangtv/HomeItems.java
+@@ -8,38 +8,53 @@ import java.util.*;
+ 
+ /** Stable app/source identities; removing an entry never uninstalls an app. */
+ final class HomeItems {
+-    static final String[] DEFAULTS = {"hdmi:2", "hdmi:1", "com.xiaodianshi.tv.yst",
+-            "com.xiaomi.mitv.smartshare", "com.mitv.gallery", "com.mitv.tvhome"};
++    private static final int MAX_ITEMS = 9;
+     final Context context;
++    final DeviceProfile profile;
+     final LinkedHashMap<String,String> names = new LinkedHashMap<>();
+     final List<String> order = new ArrayList<>();
+     HomeItems(Context c) {
+         context = c;
+-        String[] labels = {"PlayStation 5", "Apple TV", "哔哩哔哩", "小米投屏", "相册", "小米原桌面"};
+-        for (int i=0;i<DEFAULTS.length;i++) names.put(DEFAULTS[i], labels[i]);
++        profile = DeviceProfile.get(c);
++        for (DeviceProfile.Entry entry : profile.home) names.put(entry.id, entry.label);
+         discover();
+         try {
+             JSONArray data = new JSONArray(c.getSharedPreferences("home-items",0).getString("order","[]"));
+-            for (int i=0;i<data.length() && order.size()<9;i++) {
++            for (int i=0;i<data.length() && order.size()<MAX_ITEMS;i++) {
+                 String id = data.getString(i);
+                 if (validId(id) && !order.contains(id)) order.add(id);
+             }
+         } catch (Exception ignored) { order.clear(); }
+-        if (order.isEmpty()) order.addAll(Arrays.asList(DEFAULTS));
++        if (order.isEmpty()) order.addAll(defaults());
++    }
++    /** Profile-declared entries, or a few discovered apps on an unknown TV. */
++    private List<String> defaults() {
++        List<String> ids = new ArrayList<>();
++        if (!profile.home.isEmpty()) {
++            for (DeviceProfile.Entry entry : profile.home) ids.add(entry.id);
++            return ids;
++        }
++        for (String id : names.keySet()) {
++            if (profile.isStockHome(id)) continue;
++            ids.add(id);
++            if (ids.size() >= 6) break;
++        }
++        if (ids.isEmpty() && profile.stockHome != null) ids.add(profile.stockHome.getPackageName());
++        return ids;
+     }
+     void discover() {
+         for (String category : new String[]{Intent.CATEGORY_LEANBACK_LAUNCHER, Intent.CATEGORY_LAUNCHER}) {
+             for (ResolveInfo r : context.getPackageManager().queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(category), 0)) {
+                 String id = r.activityInfo.packageName;
+                 if (!id.equals(context.getPackageName()) && r.activityInfo.enabled && r.activityInfo.exported)
+-                    names.putIfAbsent(id, XiaomiControls.label(id, r.loadLabel(context.getPackageManager()).toString()));
++                    names.putIfAbsent(id, profile.label(id, r.loadLabel(context.getPackageManager()).toString()));
+             }
+         }
+     }
+     String name(String id) { return names.getOrDefault(id, context.getSharedPreferences("home-items",0).getString("name:"+id,id)); }
+     static boolean validId(String id) { return id.equals("hdmi:1") || id.equals("hdmi:2") || id.matches("[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z0-9_]+)+"); }
+     boolean save(List<String> next) {
+-        if (next.isEmpty() || next.size()>9 || new HashSet<>(next).size()!=next.size()) return false;
++        if (next.isEmpty() || next.size()>MAX_ITEMS || new HashSet<>(next).size()!=next.size()) return false;
+         for(String id : next) if(!validId(id)) return false;
+         android.content.SharedPreferences.Editor e = context.getSharedPreferences("home-items",0).edit()
+                 .putString("order",new JSONArray(next).toString());
+diff --git a/app/src/main/java/io/github/op7418/guizangtv/HomeSettings.java b/app/src/main/java/io/github/op7418/guizangtv/HomeSettings.java
+index d75acae..e9134da 100644
+--- a/app/src/main/java/io/github/op7418/guizangtv/HomeSettings.java
++++ b/app/src/main/java/io/github/op7418/guizangtv/HomeSettings.java
+@@ -100,7 +100,7 @@ final class HomeSettings {
+             case "overview":
+                 entry("背景", "壁纸、轮播与纯色",()->go("background"));entry("布局","列表、Dock、图标与文字",()->go("layout"));
+                 entry("字体","字形与字号",()->go("type"));entry("选中样式","文字高亮与毛玻璃",()->go("focus"));
+-                entry("时间与天气","城市、温度与天气显示",()->go("weather"));entry("首页内容","添加、排序、隐藏",()->go("home"));entry("电视与启动","自动进入与小米系统",()->go("tv"));entry("实验性功能","Codex 对话 · 默认关闭",()->go("experiments"));break;
++                entry("时间与天气","城市、温度与天气显示",()->go("weather"));entry("首页内容","添加、排序、隐藏",()->go("home"));entry("电视与启动","自动进入与系统设置",()->go("tv"));entry("实验性功能","Codex 对话 · 默认关闭",()->go("experiments"));break;
+             case "background":
+                 row("背景","background",new String[]{"照片","浅色","深色"});
+                 if(a.appearance.get("background")==0){entry("壁纸",a.wallpapers.name(a.wallpapers.selected()),()->go("wallpaper"));entry("轮播",a.wallpapers.rotating()?"每 "+a.wallpapers.minutes()+" 分钟":"固定壁纸",()->go("rotation"));}
+@@ -150,7 +150,7 @@ final class HomeSettings {
+                 note("当前支持文字对话；语音输入取决于系统输入法。尚未接入日程、米家或电脑控制。");
+                 note("关闭后隐藏入口并停止电视端连接，保留配对。已发送的回答可能继续在电脑完成；完全停用请在电脑停止连接服务。");break;
+             case "tv":
+-                entry("开机自动进入",BootStart.enabled(a)?"已开启":"已关闭",()->BootStart.show(a));entry("电视系统设置","网络、声音、画面等",a::systemSettings);entry("小米原桌面","打开原来的电视首页",a::stockHome);break;
++                entry("开机自动进入",BootStart.enabled(a)?"已开启":"已关闭",()->BootStart.show(a));entry("电视系统设置","网络、声音、画面等",a::systemSettings);entry(a.profile.homeLabel,"打开原来的电视首页",a::stockHome);break;
+             default:
+                 String id=page.substring(5);int pos=a.items.order.indexOf(id);
+                 if(pos>0)entry("上移","与上一项交换位置",()->move(id,-1));if(pos>=0&&pos<a.items.order.size()-1)entry("下移","与下一项交换位置",()->move(id,1));
+diff --git a/app/src/main/java/io/github/op7418/guizangtv/XiaomiControls.java a/app/src/main/java/io/github/op7418/guizangtv/XiaomiControls.java
+deleted file mode 100644
+index 8ba8d19..0000000
+--- a/app/src/main/java/io/github/op7418/guizangtv/XiaomiControls.java
++++ /dev/null
+@@ -1,103 +0,0 @@
+-package io.github.op7418.guizangtv;
+-
+-import android.content.ComponentName;
+-import android.content.Context;
+-import android.content.Intent;
+-import android.content.pm.ActivityInfo;
+-import android.content.pm.PackageManager;
+-import android.os.Build;
+-import android.provider.Settings;
+-
+-/** Local profile verified on MiTV-MTSU0, OS3.0.119.0.UTSMATV. */
+-final class XiaomiControls {
+-    private XiaomiControls() { }
+-
+-    static boolean enabled() {
+-        return "MiTV-MTSU0".equals(Build.MODEL);
+-    }
+-
+-    /** Observed on this firmware: source 23 = HDMI 1, source 24 = HDMI 2. */
+-    static boolean openHdmi(Context context, int port) {
+-        if (!enabled() || port < 1 || port > 2) return false;
+-        ComponentName target = new ComponentName("com.xiaomi.mitv.tvplayer",
+-                "com.xiaomi.mitv.tvplayer.ExternalSourceActivity");
+-        try {
+-            ActivityInfo info = context.getPackageManager().getActivityInfo(target, 0);
+-            if (!info.enabled || !info.exported) return false;
+-            if (info.permission != null
+-                    && context.checkSelfPermission(info.permission) != PackageManager.PERMISSION_GRANTED)
+-                return false;
+-            context.startActivity(new Intent("com.xiaomi.mitv.tvplayer.EXTSRC_PLAY")
+-                    .setComponent(target).putExtra("input", 22 + port)
+-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+-            return true;
+-        } catch (PackageManager.NameNotFoundException | RuntimeException unavailable) {
+-            android.util.Log.w("TvHome.Xiaomi", "HDMI entry unavailable", unavailable);
+-            return false;
+-        }
+-    }
+-
+-    static Intent settings(Context context, String standardAction) {
+-        if (!enabled()) return new Intent(standardAction);
+-        String action, activity;
+-        if (Settings.ACTION_SETTINGS.equals(standardAction)) {
+-            action = "com.xiaomi.mitv.settings.SETTINGS";
+-            activity = ".entry.MainActivity";
+-        } else if (Settings.ACTION_WIFI_SETTINGS.equals(standardAction)) {
+-            action = "com.xiaomi.mitv.settings.WIFI_SETTINGS";
+-            activity = ".wifi.MitvWifiActivity";
+-        } else return null;
+-        Intent intent = new Intent(action).setComponent(ComponentName.unflattenFromString(
+-                "com.xiaomi.mitv.settings/" + activity));
+-        return intent.resolveActivity(context.getPackageManager()) != null ? intent : null;
+-    }
+-
+-    static boolean showInputs(Context context) {
+-        if (!enabled()) return false;
+-        ComponentName receiver = new ComponentName("com.xiaomi.mitv.settings",
+-                "com.xiaomi.mitv.settings.SettingsBroadcastReceiver");
+-        try {
+-            ActivityInfo info = context.getPackageManager().getReceiverInfo(receiver, 0);
+-            if (!info.exported || !info.enabled) return false;
+-            if (info.permission != null
+-                    && context.checkSelfPermission(info.permission) != PackageManager.PERMISSION_GRANTED)
+-                return false;
+-            context.sendBroadcast(new Intent("com.xiaomi.mitv.settings.INPUTSOURCE_POPUP")
+-                    .setComponent(receiver));
+-            return true;
+-        } catch (PackageManager.NameNotFoundException | SecurityException unavailable) {
+-            return false;
+-        }
+-    }
+-
+-    static String label(String pkg, String original) {
+-        if (!enabled()) return original;
+-        switch (pkg) {
+-            case "com.xiaodianshi.tv.yst": return "哔哩哔哩";
+-            case "com.xiaomi.mitv.smartshare": return "小米投屏";
+-            case "com.mitv.gallery": return "相册";
+-            case "com.mitv.tvhome": return "小米原桌面";
+-            default: return original;
+-        }
+-    }
+-
+-    static boolean startStockHome(Context context, ComponentName component) {
+-        if (!enabled() || !"com.mitv.tvhome".equals(component.getPackageName())) return false;
+-        // The public MAIN alias is exported without HOME_STATE. The directly enumerated
+-        // MainActivityUserMode target requires Xiaomi's signature permission on this firmware.
+-        ComponentName alias = new ComponentName("com.mitv.tvhome", "com.mitv.tvhome.MainActivity");
+-        try {
+-            ActivityInfo info = context.getPackageManager().getActivityInfo(alias, 0);
+-            if (!info.enabled || !info.exported) return false;
+-            if (info.permission != null
+-                    && context.checkSelfPermission(info.permission) != PackageManager.PERMISSION_GRANTED)
+-                return false;
+-            context.startActivity(new Intent(Intent.ACTION_MAIN).setComponent(alias)
+-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED));
+-            return true;
+-        } catch (PackageManager.NameNotFoundException | RuntimeException unavailable) {
+-            android.util.Log.w("TvHome.Xiaomi", "Public Xiaomi Home entry unavailable", unavailable);
+-            return false;
+-        }
+-    }
+-}
+diff --git b/docs/DEVICE-PROFILES.md b/docs/DEVICE-PROFILES.md
+new file mode 100644
+index 0000000..7c5bee7
+--- /dev/null
++++ b/docs/DEVICE-PROFILES.md
+@@ -0,0 +1,72 @@
++# 设备配置（Device Profiles）
++
++上游 `guizang-tv` 把小米的包名、HDMI 组件和启动逻辑写死在 `XiaomiControls.java` 里。这个分支把它抽成配置：**加一台新电视只改 `assets/devices.json`，不改 Java**。
++
++## 怎么选配置
++
++`DeviceProfile` 在应用启动时读取 `app/src/main/assets/devices.json`，按数组顺序拿每条 profile 的 `match` 去比 `Build.MANUFACTURER` / `Build.BRAND` / `Build.MODEL`：
++
++- 大小写不敏感
++- 支持 `*` 通配，例如 `"MiTV-*"`
++- 三条都匹配才算命中（某条没写则该维度不限制）
++- 第一个命中的生效；都不命中就用 `id = "generic"` 那条
++- 连 `devices.json` 都读不到时退化成空配置，不崩溃
++
++命中的 profile 会打一条日志：`TvHome.Profile: profile <id> for <brand>/<model>`。
++
++## 字段
++
++| 字段 | 说明 |
++| --- | --- |
++| `id` / `name` | 标识和人类可读名，`name` 会出现在设置页提示里 |
++| `match` | `manufacturer` / `brand` / `model`，每项是字符串数组 |
++| `homeLabel` | 设置页里「打开原来的电视首页」那一项显示的名字，如 `创维原桌面` |
++| `bootStart` | 是否支持应用内置的「开机自动进入」（小米专用钩子） |
++| `home` | 首页默认入口，`[{id, label}]`。`id` 可以是包名、`hdmi:1`、`hdmi:2`。留空则自动取前 6 个已安装应用 |
++| `labels` | 包名 → 显示名覆盖，例如把 `com.xiaodianshi.tv.yst` 显示成「哔哩哔哩」 |
++| `stockHome` | 原桌面组件 `{component, action}`；首页里出现这个包名时走它 |
++| `hdmi` | `{component, action, extra, base, ports}`。切换 `hdmi:N` 时发送 `action` 到 `component`，并带上 `extra: base + N` |
++| `inputs` | 「其他信号源」按钮：`{action, component}`，发广播给该组件 |
++| `settings` | 标准设置 action → `{action, component}` 的映射，例如 `android.settings.SETTINGS` |
++| `claims` | 启动时要抢回的 system property，值里可用 `$package` 占位当前包名 |
++
++## 已内置的配置
++
++### `xiaomi-mitv-mtsu0`（上游行为，原样保留）
++
++对应上游已验证的 MiTV-MTSU0 / Android 14。HDMI 走 `com.xiaomi.mitv.tvplayer.ExternalSourceActivity`，`input = 22 + 端口`；设置页走 `com.xiaomi.mitv.settings`；信号源走 `SettingsBroadcastReceiver` 广播；开机自启钩子可用。
++
++> 只匹配 `MiTV-MTSU0`，和上游一致。其他小米机型仍走 `generic`，不会把一个没验证过的 HDMI 参数套上去。
++
++### `skyworth-coocaa-bc20`（本分支新增）
++
++创维 1AA02_BC20 商用电视（Skyworth / Coocaa，Android 9，MTK T963）。这台的行为和 Android 标准差得比较多：
++
++- **Home 键不走默认桌面**：系统读 `persist.service.homepage.pkg/cls` 直接启动，忽略 `pm set-home-activity`。所以 profile 用 `claims` 在应用回到前台时把这两个属性写回自己。
++- **开机首页也不走默认桌面**：`/system/etc/bootintent.xml` 按条件匹配启动项。命中 `modelhome`（`persist.service.model.pkg/cls` 都存在）就会启动指定的组件。这两个属性只能靠 adb 在首次配置时写入，见仓库根目录的 README。
++- 没有可用的 HDMI / 信号源组件，所以 `hdmi` 和 `inputs` 都留空，界面上点会提示「暂时无法打开」。
++- 固件会在开机时拦截第三方应用的 `BOOT_COMPLETED`（`process is bad`），所以 `bootStart = false`，开机入口靠 `bootintent.xml` 的 `modelhome`。
++
++## 加一台新电视
++
++1. 在 `devices.json` 里加一条 profile，`id` 用「品牌-型号」。
++2. 用 adb 查真实组件：
++   ```sh
++   adb shell getprop ro.product.manufacturer; adb shell getprop ro.product.brand; adb shell getprop ro.product.model
++   adb shell pm list packages | grep -i <厂商>
++   adb shell dumpsys package <包名> | sed -n '/Activity Resolver Table/,/^ *$/p'
++   ```
++3. 把 `home` / `labels` / `stockHome` 填成这台机器上真实存在的包和组件。
++4. 有 HDMI 或信号源组件的机型再补 `hdmi` / `inputs`；`extra` 的数值逻辑要用实机验证，不要照抄小米的 `22 + port`。
++5. 重新构建安装，逐项验证：首页渲染、每个入口能打开、返回键、Home 键、重启后的行为。
++6. 只有验证过的行为才写进 `docs/COMPATIBILITY.md` 一类文档，别把"配置里写了"当成"已支持"。
++
++## 还没有配置化的部分
++
++以下仍是代码，不在 JSON 里：
++
++- 壁纸打包与轮播（`FrameWallpapers` / `WallpaperCycle`）
++- 布局、字体、焦点样式（`HomeAppearance` / `HomeSurface`）
++- Codex 对话实验（`HomeAssistant`）
++
++这些和电视品牌无关，换机型不用动。真正随品牌变化的只有本文件描述的启动、信号源、设置和首页默认项。

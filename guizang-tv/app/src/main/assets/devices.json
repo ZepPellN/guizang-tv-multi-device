@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "comment": "Per-TV behaviour. Profiles are matched top-down against Build.MANUFACTURER / BRAND / MODEL; '*' is a glob. The first match wins, 'generic' is the fallback. Adding a TV means adding an entry here, not editing Java. See docs/DEVICE-PROFILES.md.",
+  "profiles": [
+    {
+      "id": "xiaomi-mitv-mtsu0",
+      "name": "小米电视 MiTV-MTSU0",
+      "homeLabel": "小米原桌面",
+      "bootStart": true,
+      "match": {
+        "model": ["MiTV-MTSU0"]
+      },
+      "home": [
+        {"id": "hdmi:2", "label": "PlayStation 5"},
+        {"id": "hdmi:1", "label": "Apple TV"},
+        {"id": "com.xiaodianshi.tv.yst", "label": "哔哩哔哩"},
+        {"id": "com.xiaomi.mitv.smartshare", "label": "小米投屏"},
+        {"id": "com.mitv.gallery", "label": "相册"},
+        {"id": "com.mitv.tvhome", "label": "小米原桌面"}
+      ],
+      "labels": {
+        "com.xiaodianshi.tv.yst": "哔哩哔哩",
+        "com.xiaomi.mitv.smartshare": "小米投屏",
+        "com.mitv.gallery": "相册",
+        "com.mitv.tvhome": "小米原桌面"
+      },
+      "stockHome": {
+        "component": "com.mitv.tvhome/com.mitv.tvhome.MainActivity",
+        "action": "android.intent.action.MAIN"
+      },
+      "hdmi": {
+        "component": "com.xiaomi.mitv.tvplayer/com.xiaomi.mitv.tvplayer.ExternalSourceActivity",
+        "action": "com.xiaomi.mitv.tvplayer.EXTSRC_PLAY",
+        "extra": "input",
+        "base": 22,
+        "ports": [1, 2]
+      },
+      "inputs": {
+        "action": "com.xiaomi.mitv.settings.INPUTSOURCE_POPUP",
+        "component": "com.xiaomi.mitv.settings/com.xiaomi.mitv.settings.SettingsBroadcastReceiver"
+      },
+      "settings": {
+        "android.settings.SETTINGS": {
+          "action": "com.xiaomi.mitv.settings.SETTINGS",
+          "component": "com.xiaomi.mitv.settings/.entry.MainActivity"
+        },
+        "android.settings.WIFI_SETTINGS": {
+          "action": "com.xiaomi.mitv.settings.WIFI_SETTINGS",
+          "component": "com.xiaomi.mitv.settings/.wifi.MitvWifiActivity"
+        }
+      }
+    },
+    {
+      "id": "skyworth-coocaa-bc20",
+      "name": "创维/酷开 1AA02_BC20（商用）",
+      "homeLabel": "创维原桌面",
+      "bootStart": false,
+      "match": {
+        "manufacturer": ["Skyworth"],
+        "brand": ["Skyworth", "Coocaa"]
+      },
+      "home": [
+        {"id": "com.xiaodianshi.tv.yst", "label": "哔哩哔哩"},
+        {"id": "com.tianci.movieplatform", "label": "创维原桌面"}
+      ],
+      "labels": {
+        "com.xiaodianshi.tv.yst": "哔哩哔哩"
+      },
+      "stockHome": {
+        "component": "com.tianci.movieplatform/com.coocaa.homepage.vast.RealHomePageActivity",
+        "action": "android.intent.action.MAIN"
+      },
+      "claims": {
+        "persist.service.homepage.pkg": "$package",
+        "persist.service.homepage.cls": "$package.FrameHomeActivity"
+      }
+    },
+    {
+      "id": "generic",
+      "name": "通用 Android TV",
+      "homeLabel": "原桌面",
+      "bootStart": false,
+      "match": {},
+      "home": []
+    }
+  ]
+}

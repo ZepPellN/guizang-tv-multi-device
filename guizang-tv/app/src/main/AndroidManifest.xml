@@ -1,0 +1,51 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <queries>
+        <intent><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent>
+        <intent><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LEANBACK_LAUNCHER" /></intent>
+        <package android:name="com.xiaomi.mitv.settings" />
+        <package android:name="com.xiaomi.mitv.tvplayer" />
+        <package android:name="com.mitv.tvhome" />
+    </queries>
+    <application android:label="@string/app_name" android:icon="@drawable/ic_launcher"
+        android:banner="@drawable/banner" android:theme="@style/Theme.GuiZangTV"
+        android:allowBackup="false" android:supportsRtl="true">
+        <activity android:name=".FrameHomeActivity" android:exported="true"
+            android:launchMode="singleTask" android:stateNotNeeded="true"
+            android:excludeFromRecents="true" android:clearTaskOnLaunch="true"
+            android:configChanges="orientation|screenSize|keyboard|keyboardHidden|uiMode"
+            android:screenOrientation="landscape">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- Xiaomi's package-based startup hook resolves INFO before LAUNCHER.
+             Ordinary TV app-list entries still open FrameHomeActivity directly. -->
+        <activity android:name=".BootGateActivity" android:exported="true"
+            android:excludeFromRecents="true" android:noHistory="true" android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.INFO" />
+            </intent-filter>
+        </activity>
+        <!-- This TV resets the Home/boot target from a read-only factory config on
+             every boot, so the launcher reclaims it and shows itself once more. -->
+        <receiver android:name=".BootReceiver" android:exported="true" android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>
