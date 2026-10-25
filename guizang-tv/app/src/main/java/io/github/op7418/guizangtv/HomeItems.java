@@ -26,6 +26,13 @@ final class HomeItems {
             }
         } catch (Exception ignored) { order.clear(); }
         if (order.isEmpty()) order.addAll(defaults());
+        pinStockHomeLast(order);
+    }
+    /** The TV's own launcher is a fallback, so it always sits at the bottom of the list. */
+    private void pinStockHomeLast(List<String> ids) {
+        if (profile.stockHome == null) return;
+        String stock = profile.stockHome.getPackageName();
+        if (ids.remove(stock)) ids.add(stock);
     }
     /** Profile-declared entries, or a few discovered apps on an unknown TV. */
     private List<String> defaults() {
@@ -56,10 +63,12 @@ final class HomeItems {
     boolean save(List<String> next) {
         if (next.isEmpty() || next.size()>MAX_ITEMS || new HashSet<>(next).size()!=next.size()) return false;
         for(String id : next) if(!validId(id)) return false;
+        List<String> saved = new ArrayList<>(next);
+        pinStockHomeLast(saved);
         android.content.SharedPreferences.Editor e = context.getSharedPreferences("home-items",0).edit()
-                .putString("order",new JSONArray(next).toString());
-        for(String id:next) e.putString("name:"+id,name(id));
+                .putString("order",new JSONArray(saved).toString());
+        for(String id:saved) e.putString("name:"+id,name(id));
         if(!e.commit()) return false;
-        order.clear(); order.addAll(next); return true;
+        order.clear(); order.addAll(saved); return true;
     }
 }

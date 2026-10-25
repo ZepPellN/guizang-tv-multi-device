@@ -10,7 +10,7 @@
 | --- | --- |
 | 上游 | <https://github.com/op7418/guizang-tv> |
 | fork 基线 | `312c011`（2026-10-22，`Adapt frosted white and dark chat capsules from Web materials`） |
-| 与上游的差异 | 10 个文件，+539 / −125，完整 patch 见 [`patches/`](patches/) |
+| 与上游的差异 | 10 个文件，+551 / −128，完整 patch 见 [`patches/`](patches/) |
 | 许可证 | MIT（上游与本分支一致，见 [NOTICE.md](NOTICE.md)） |
 
 ---
@@ -106,7 +106,7 @@ TV=192.168.1.20 ./install.sh
 
 ## 相对上游的改动
 
-完整差异：[`patches/0001-skyworth-bc20-device-profiles.patch`](patches/0001-skyworth-bc20-device-profiles.patch)，基线是上游 `312c011`，10 个文件 +539/−125，`git apply --check` 已验证。说明见 [patches/README.md](patches/README.md)。
+完整差异：[`patches/0001-skyworth-bc20-device-profiles.patch`](patches/0001-skyworth-bc20-device-profiles.patch)，基线是上游 `312c011`，10 个文件 +551/−128，`git apply --check` 已验证。说明见 [patches/README.md](patches/README.md)。
 
 1. 新增 `DeviceProfile` + `assets/devices.json`：设备能力全部配置化。
 2. 删除 `XiaomiControls`：小米逻辑原样搬进 `xiaomi-mitv-mtsu0` 配置，行为不变。
@@ -115,6 +115,7 @@ TV=192.168.1.20 ./install.sh
 5. 设置页文案用 `homeLabel`（创维原桌面 / 小米原桌面）。
 6. 新增 `BootReceiver`（本机被拦截，保留兜底）。
 7. 壁纸：自有照片打进 APK，内置那套仍保留。**照片本身不进仓库。**
+8. 原桌面入口固定排在首页最底部（`HomeItems.pinStockHomeLast`）：新加的入口会插到它上面，把它挤到下面的操作也会被纠正回来。
 
 ---
 

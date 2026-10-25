@@ -556,10 +556,10 @@ index 24e9337..a3d6e41 100644
          super.dump(prefix,fd,out,args);wallpapers.dump(out);BootStart.dump(this,out);weather.dump(out);
          out.println("HomeAppearance: "+appearance.prefs.getAll()+" items="+items.order+" settings="+settings.page());
 diff --git a/app/src/main/java/io/github/op7418/guizangtv/HomeItems.java b/app/src/main/java/io/github/op7418/guizangtv/HomeItems.java
-index 0b23ca0..6bba07e 100644
+index 0b23ca0..b530784 100644
 --- a/app/src/main/java/io/github/op7418/guizangtv/HomeItems.java
 +++ b/app/src/main/java/io/github/op7418/guizangtv/HomeItems.java
-@@ -8,38 +8,53 @@ import java.util.*;
+@@ -8,43 +8,67 @@ import java.util.*;
  
  /** Stable app/source identities; removing an entry never uninstalls an app. */
  final class HomeItems {
@@ -587,6 +587,13 @@ index 0b23ca0..6bba07e 100644
          } catch (Exception ignored) { order.clear(); }
 -        if (order.isEmpty()) order.addAll(Arrays.asList(DEFAULTS));
 +        if (order.isEmpty()) order.addAll(defaults());
++        pinStockHomeLast(order);
++    }
++    /** The TV's own launcher is a fallback, so it always sits at the bottom of the list. */
++    private void pinStockHomeLast(List<String> ids) {
++        if (profile.stockHome == null) return;
++        String stock = profile.stockHome.getPackageName();
++        if (ids.remove(stock)) ids.add(stock);
 +    }
 +    /** Profile-declared entries, or a few discovered apps on an unknown TV. */
 +    private List<String> defaults() {
@@ -619,8 +626,18 @@ index 0b23ca0..6bba07e 100644
 -        if (next.isEmpty() || next.size()>9 || new HashSet<>(next).size()!=next.size()) return false;
 +        if (next.isEmpty() || next.size()>MAX_ITEMS || new HashSet<>(next).size()!=next.size()) return false;
          for(String id : next) if(!validId(id)) return false;
++        List<String> saved = new ArrayList<>(next);
++        pinStockHomeLast(saved);
          android.content.SharedPreferences.Editor e = context.getSharedPreferences("home-items",0).edit()
-                 .putString("order",new JSONArray(next).toString());
+-                .putString("order",new JSONArray(next).toString());
+-        for(String id:next) e.putString("name:"+id,name(id));
++                .putString("order",new JSONArray(saved).toString());
++        for(String id:saved) e.putString("name:"+id,name(id));
+         if(!e.commit()) return false;
+-        order.clear(); order.addAll(next); return true;
++        order.clear(); order.addAll(saved); return true;
+     }
+ }
 diff --git a/app/src/main/java/io/github/op7418/guizangtv/HomeSettings.java b/app/src/main/java/io/github/op7418/guizangtv/HomeSettings.java
 index d75acae..e9134da 100644
 --- a/app/src/main/java/io/github/op7418/guizangtv/HomeSettings.java

@@ -6,7 +6,7 @@
 | --- | --- |
 | 上游仓库 | https://github.com/op7418/guizang-tv |
 | 基线提交 | `312c011` (2026-10-22) `Adapt frosted white and dark chat capsules from Web materials` |
-| 改动规模 | 10 个文件，+539 / −125 |
+| 改动规模 | 10 个文件，+551 / −128 |
 | 许可证 | MIT（沿用上游） |
 
 ## 应用方式
@@ -29,7 +29,7 @@ git apply /path/to/0001-skyworth-bc20-device-profiles.patch
 | `.../BootReceiver.java` | **新增**。开机广播里重新认领设备属性并拉起桌面（本机被厂商拦截，见下） |
 | `.../XiaomiControls.java` | **删除**。全部逻辑搬进 `devices.json` 的 `xiaomi-mitv-mtsu0` 配置，行为保持不变 |
 | `.../FrameHomeActivity.java` | 改为走 `DeviceProfile`：HDMI、信号源、原桌面、设置、返回键、属性认领 |
-| `.../HomeItems.java` | 首页默认项来自 profile；未知机型回落到「自动取前 6 个已安装应用」 |
+| `.../HomeItems.java` | 首页默认项来自 profile；未知机型回落到「自动取前 6 个已安装应用」；原桌面入口固定在列表底部  |
 | `.../HomeSettings.java` | 「打开原来的电视首页」的文案用 `profile.homeLabel` |
 | `.../BootStart.java` | 开机入口的支持判断从「是不是小米」改成 `profile.bootStart`，提示文案用 `profile.name` |
 | `AndroidManifest.xml` | 加 `RECEIVE_BOOT_COMPLETED` 和 `BootReceiver` |
